@@ -54,67 +54,9 @@ public class Serveur {
 			serveur = new ServerSocket(PORT);
 			while (true) {
 				// Connexion d'un client
-				final Socket chaussette;
-
+				Socket chaussette;
 				chaussette = serveur.accept();
-				new Thread(new Runnable() {
-					FtpRequest requete = new FtpRequest(Serveur.this);
-
-					@Override
-					public void run() {
-						try {
-							boolean quit = false;
-							chaussette.getOutputStream().write(
-									new FtpAnswer(220,
-											"Bonjour a toi, jeune padawan")
-											.getBytes());
-							BufferedInputStream bis = new BufferedInputStream(
-									chaussette.getInputStream());
-							while (!quit) {
-								byte[] buffer = new byte[32];
-								bis.read(buffer);
-								String recu = new String(buffer);
-								// traitement
-								if (recu.contains("\n"))
-									recu = recu.substring(0, recu.indexOf('\n'));
-								recu = recu.substring(0, recu.length() - 1);
-								String[] command = recu.split(" ");
-								if (Main.DEBUG_MODE)
-									System.out.println(recu);
-								FtpAnswer answer = Serveur.this.performCommand(
-										requete, command[0], command);
-								chaussette.getOutputStream().write(
-										answer.getBytes());
-							}
-						} catch (IOException e) {
-							System.err.println("Erreur d'ecriture socket: "
-									+ e.getMessage());
-							throw new RuntimeException(e);
-						} catch (FtpException e) {
-							try {
-								chaussette.getOutputStream().write(
-										e.getAnswer().getBytes());
-							} catch (IOException e1) {
-								System.err
-										.println("Erreur d'ecriture sur socket: "
-												+ e1.getMessage());
-								throw new RuntimeException(e);
-							}
-
-						} finally {
-							try {
-								chaussette.close();
-							} catch (IOException e) {
-								System.err
-										.println("Erreur de fermeture de serveur: "
-												+ e.getMessage());
-								throw new RuntimeException(e);
-							}
-						}
-
-					}
-				}).start();
-
+				new Thread(new FtpRequest(this, chaussette)).start();
 			}
 		} catch (FileNotFoundException e) {
 			System.err

@@ -1,13 +1,17 @@
 package ftp;
 
+import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.IOException;
+import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.attribute.PosixFilePermission;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+
+import exceptions.FtpException;
 
 /**
  * Cette classe represente une requette FTP. On y trouve les methodes executant
@@ -16,12 +20,62 @@ import java.util.List;
  * @author FRANCOIS Remy and DEMOL David
  * 
  */
-public class FtpRequest {
+public class FtpRequest implements Runnable {
 	private Serveur serveur;
 	private String username;
+	private Socket socket;
+	private File directory;
+	public FtpRequest(Serveur serv, Socket socket) {
+		this.serveur = serv;
+		this.socket = socket;
+		this.directory = serv.getFilesDirectory();
+	}
 
-	public FtpRequest(Serveur s) {
-		this.serveur = s;
+	@Override
+	public void run() {
+		try {
+			boolean quit = false;
+			socket.getOutputStream().write(
+					new FtpAnswer(220, "Bonjour a toi, jeune padawan")
+							.getBytes());
+			BufferedInputStream bis = new BufferedInputStream(
+					socket.getInputStream());
+			while (!quit) {
+				byte[] buffer = new byte[32];
+				bis.read(buffer);
+				String recu = new String(buffer);
+				// traitement
+				if (recu.contains("\n"))
+					recu = recu.substring(0, recu.indexOf('\n'));
+				recu = recu.substring(0, recu.length() - 1);
+				String[] command = recu.split(" ");
+				if (Main.DEBUG_MODE)
+					System.out.println(recu);
+				FtpAnswer answer = serveur.performCommand(this,
+						command[0], command);
+				socket.getOutputStream().write(answer.getBytes());
+			}
+		} catch (IOException e) {
+			System.err.println("Erreur d'ecriture socket: " + e.getMessage());
+			throw new RuntimeException(e);
+		} catch (FtpException e) {
+			try {
+				socket.getOutputStream().write(e.getAnswer().getBytes());
+			} catch (IOException e1) {
+				System.err.println("Erreur d'ecriture sur socket: "
+						+ e1.getMessage());
+				throw new RuntimeException(e);
+			}
+
+		} finally {
+			try {
+				socket.close();
+			} catch (IOException e) {
+				System.err.println("Erreur de fermeture de serveur: "
+						+ e.getMessage());
+				throw new RuntimeException(e);
+			}
+		}
 	}
 
 	/**
@@ -156,7 +210,7 @@ public class FtpRequest {
 	 */
 	public void processQUIT() {
 		// TODO QUIT
-		
+
 	}
 
 	/**
@@ -188,7 +242,7 @@ public class FtpRequest {
 	 */
 	public String processNLST() {
 		String toReturn = "";
-		for (File f : serveur.getFilesDirectory().listFiles()) {
+		for (File f : directory.listFiles()) {
 			toReturn = (f.isDirectory()) ? toReturn + " " + f.getName() + "/"
 					: toReturn + " " + f.getName();
 		}
