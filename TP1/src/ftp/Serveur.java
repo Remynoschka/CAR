@@ -158,7 +158,7 @@ public class Serveur {
 
 			break;
 		case "LIST":
-			return new FtpAnswer(212, requete.processLIST());
+			return new FtpAnswer(250, requete.processLIST());
 		case "LPRT":
 
 			break;
@@ -184,7 +184,7 @@ public class Serveur {
 
 			break;
 		case "NLST":
-			return new FtpAnswer(212, requete.processNLST());
+			return new FtpAnswer(250, requete.processNLST());
 		case "NOOP":
 
 			break;
@@ -218,11 +218,10 @@ public class Serveur {
 
 			break;
 		case "PWD":
-
-			break;
+			return new FtpAnswer(257, requete.processPWD());
 		case "QUIT":
-
-			break;
+			requete.processQUIT();
+			return new FtpAnswer(221, "Au revoir :)");
 		case "REIN":
 
 			break;
@@ -265,7 +264,7 @@ public class Serveur {
 		case "SYST":
 			return new FtpAnswer(215, requete.processSYST());
 		case "TYPE":
-
+			
 			break;
 		case "USER":
 			if (args.length < 2) {
@@ -277,6 +276,15 @@ public class Serveur {
 					throw new UtilisateurInconnuException();
 				}
 			}
+		case "XCUP":
+		case "XMKD":
+		case "XPWD":
+			return new FtpAnswer(257, requete.processPWD());
+		case "XRCP":
+		case "XRMD":
+		case "XRSQ":
+		case "XSEM":
+		case "XSEN":
 		default:
 			throw new CommandeInconnueException(command);
 		}

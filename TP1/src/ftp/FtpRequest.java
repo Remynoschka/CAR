@@ -25,6 +25,8 @@ public class FtpRequest implements Runnable {
 	private String username;
 	private Socket socket;
 	private File directory;
+	boolean quit = false;
+
 	public FtpRequest(Serveur serv, Socket socket) {
 		this.serveur = serv;
 		this.socket = socket;
@@ -34,12 +36,13 @@ public class FtpRequest implements Runnable {
 	@Override
 	public void run() {
 		try {
-			boolean quit = false;
+
 			socket.getOutputStream().write(
 					new FtpAnswer(220, "Bonjour a toi, jeune padawan")
 							.getBytes());
 			BufferedInputStream bis = new BufferedInputStream(
 					socket.getInputStream());
+			// boucle principale
 			while (!quit) {
 				byte[] buffer = new byte[32];
 				bis.read(buffer);
@@ -51,8 +54,9 @@ public class FtpRequest implements Runnable {
 				String[] command = recu.split(" ");
 				if (Main.DEBUG_MODE)
 					System.out.println(recu);
-				FtpAnswer answer = serveur.performCommand(this,
-						command[0], command);
+
+				FtpAnswer answer = serveur.performCommand(this, command[0],
+						command);
 				socket.getOutputStream().write(answer.getBytes());
 			}
 		} catch (IOException e) {
@@ -66,7 +70,6 @@ public class FtpRequest implements Runnable {
 						+ e1.getMessage());
 				throw new RuntimeException(e);
 			}
-
 		} finally {
 			try {
 				socket.close();
@@ -122,8 +125,7 @@ public class FtpRequest implements Runnable {
 	 * derniere modification et le nom du fichier
 	 */
 	public String processLIST() {
-		// TODO Corriger LIST pour qu'il fonctionne correctement sous Windows
-		File[] files = serveur.getFilesDirectory().listFiles();
+		File[] files = directory.listFiles();
 		String[] list = new String[files.length];
 		for (int i = 0; i < list.length; i++) {
 
@@ -189,7 +191,6 @@ public class FtpRequest implements Runnable {
 							+ files[i].getName();
 				}
 			} catch (IOException e) {
-				// TODO ameliorer ce catch
 				System.err
 						.println("Erreur de lecture du repertoire lors d'un LIST: "
 								+ e.getMessage());
@@ -207,10 +208,11 @@ public class FtpRequest implements Runnable {
 
 	/**
 	 * Effectue la commande FTP QUIT
+	 * 
 	 */
 	public void processQUIT() {
 		// TODO QUIT
-
+		quit = true;
 	}
 
 	/**
@@ -249,4 +251,23 @@ public class FtpRequest implements Runnable {
 		return toReturn;
 	}
 
+	/**
+	 * Execute la commande FTP PWD
+	 * 
+	 * @return
+	 */
+	public String processPWD() {
+		// TODO Sans doute devoir ameliorer le PWD
+		return "/" + directory.getPath();
+	}
+
+	/**
+	 * Execute le commande FTP TYPE
+	 * 
+	 * @param type
+	 *            : Le type envoye
+	 */
+	public void processTYPE(Type type) {
+
+	}
 }
