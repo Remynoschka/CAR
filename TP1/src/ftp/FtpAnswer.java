@@ -22,6 +22,8 @@ public class FtpAnswer {
 	public FtpAnswer(int code, String msg) {
 		this.code = code;
 		this.msg = msg;
+		if (Main.DEBUG_MODE)
+			System.out.println(code +" "+msg);
 	}
 
 	/**

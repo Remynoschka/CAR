@@ -2,7 +2,11 @@ package ftp;
 
 import java.io.BufferedInputStream;
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -11,6 +15,7 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 
+import exceptions.FichierIntrouvableException;
 import exceptions.FtpException;
 
 /**
@@ -26,11 +31,16 @@ public class FtpRequest implements Runnable {
 	private Socket socket;
 	private File directory;
 	boolean quit = false;
+	private Type type;
+	private Socket dataChannel;
+	private int portPASV;
+	private Mode mode;
 
 	public FtpRequest(Serveur serv, Socket socket) {
 		this.serveur = serv;
 		this.socket = socket;
 		this.directory = serv.getFilesDirectory();
+		mode = Mode.ACTIF;
 	}
 
 	@Override
@@ -103,17 +113,51 @@ public class FtpRequest implements Runnable {
 	/**
 	 * Effectue la commande FTP RETR
 	 */
-	public void processRETR() {
-		// TODO RETR
+	public void processRETR(Socket chaussette, String fichier) {
+		// TODO Corriger RETR
+		try {
+			InputStream in = new FileInputStream(fichier);
+			OutputStream out = chaussette.getOutputStream();
+
+			int numberByte;
+			byte[] data = new byte[2046];
+
+			while ((numberByte = in.read(data)) != -1) {
+				out.write(data, 0, numberByte);
+			}
+
+			out.close();
+		} catch (IOException e) {
+			System.err.println(e.getMessage());
+			throw new RuntimeException(e);
+		}
 
 	}
 
 	/**
 	 * Effectue la commande FTP STOR
 	 */
-	public void processSTOR() {
-		// TODO STOR
+	public void processSTOR(String filename) {
+		// TODO Corriger STOR
+		try {
 
+			InputStream in = dataChannel.getInputStream();
+			// A modifier (pour le test)
+			OutputStream out = new FileOutputStream(directory + "/" + filename);
+
+			int numberByte;
+			byte[] data = new byte[2056];
+
+			while ((numberByte = in.read(data)) != -1) {
+				out.write(data, 0, numberByte);
+			}
+
+			out.flush();
+			out.close();
+		} catch (IOException e) {
+			System.err.println(e.getMessage());
+			throw new RuntimeException(e);
+		}
 	}
 
 	/**
@@ -211,7 +255,7 @@ public class FtpRequest implements Runnable {
 	 * 
 	 */
 	public void processQUIT() {
-		// TODO QUIT
+		// TODO Ameliorer QUIT
 		quit = true;
 	}
 
@@ -252,12 +296,42 @@ public class FtpRequest implements Runnable {
 	}
 
 	/**
+	 * Execute la commande FTP CWD
+	 * 
+	 * @param path
+	 *            : le chemin vers le repertoire de destination
+	 * @return la reponse FTP renvoye par la commande
+	 * @throws IOException
+	 * @throws FichierIntrouvableException
+	 */
+	public FtpAnswer processCWD(String path) throws IOException,
+			FichierIntrouvableException {
+		// TODO Corriger CWD
+		if (path.equals("/")) {
+			directory = serveur.getFilesDirectory();
+			return new FtpAnswer(250, "Le nouveau repertoire est " + path);
+		} else {
+			for (File f : directory.listFiles()) {
+				if (f.getCanonicalPath().equals(
+						directory.getCanonicalPath() + path)) {
+					directory = f;
+					return new FtpAnswer(250, "Le nouveau repertoire est "
+							+ path);
+				}
+			}
+			throw new FichierIntrouvableException();
+		}
+	}
+
+	/**
 	 * Execute la commande FTP PWD
 	 * 
-	 * @return
+	 * @return le chemin du repertoire courant
 	 */
 	public String processPWD() {
-		// TODO Sans doute devoir ameliorer le PWD
+		if (directory.getPath().equals(serveur.getFilesDirectory().getPath())) {
+			return "/";
+		}
 		return "/" + directory.getPath();
 	}
 
@@ -268,6 +342,50 @@ public class FtpRequest implements Runnable {
 	 *            : Le type envoye
 	 */
 	public void processTYPE(Type type) {
+		this.type = type;
+	}
 
+	/**
+	 * Execute la commande FTP PASV
+	 * 
+	 * @see http://blog.nicolargo.com/2008/04/ftp-actif-versus-ftp-passif.html
+	 */
+	public void processPASV() {
+		mode = Mode.PASSIF;
+	}
+
+	/**
+	 * Execute la commande FTP CDUP
+	 */
+	public void processCDUP() {
+		// TODO CDUP
+	}
+
+	/**
+	 * Execute la commande FTP MKD
+	 * 
+	 * @param name
+	 *            : le nom du repertoire a creer
+	 * @return true si le repertoire a bien ete cree, false sinon
+	 */
+	public boolean processMKD(String name) {
+		File newDir = new File(directory.getPath() + "/" + name);
+		return newDir.mkdir();
+	}
+
+	/**
+	 * Execute la commande FTP RMD
+	 * 
+	 * @param name
+	 *            : le nom du repertoire a supprimer
+	 * @return true si le repertoire a bien ete supprime, false sinon
+	 */
+	public boolean processRMD(String name) {
+		File toDelete = new File(directory.getAbsolutePath() + "/" + name);
+		if (toDelete.exists()) {
+			toDelete.delete();
+			return true;
+		}
+		return false;
 	}
 }

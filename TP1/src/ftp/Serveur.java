@@ -1,6 +1,5 @@
 package ftp;
 
-import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -11,8 +10,9 @@ import java.util.Map;
 
 import exceptions.ArgumentManquantException;
 import exceptions.CommandeInconnueException;
-import exceptions.FtpException;
+import exceptions.FichierIntrouvableException;
 import exceptions.MotDePassIncorrectException;
+import exceptions.TypeIncorrectException;
 import exceptions.UtilisateurInconnuException;
 
 /**
@@ -99,62 +99,23 @@ public class Serveur {
 	 * @throws CommandeInconnueException
 	 * @throws MotDePassIncorrectException
 	 * @throws ArgumentManquantException
+	 * @throws TypeIncorrectException 
+	 * @throws IOException 
+	 * @throws FichierIntrouvableException 
 	 */
 	public FtpAnswer performCommand(FtpRequest requete, String command,
 			String[] args) throws UtilisateurInconnuException,
 			CommandeInconnueException, MotDePassIncorrectException,
-			ArgumentManquantException {
+			ArgumentManquantException, TypeIncorrectException, FichierIntrouvableException, IOException {
 
 		switch (command) {
-		case "ABOR":
-
-			break;
-		case "ACCT":
-
-			break;
-		case "ADAT":
-
-			break;
-		case "ALLO":
-
-			break;
-		case "APPE":
-
-			break;
-		case "AUTH":
-
-			break;
-		case "CCC":
-
-			break;
 		case "CDUP":
 
 			break;
-		case "CONF":
 
-			break;
 		case "CWD":
-
-			break;
+			return requete.processCWD(args[1]);
 		case "DELE":
-
-			break;
-		case "ENC":
-
-			break;
-		case "EPRT":
-
-			break;
-		case "EPSV":
-
-			break;
-		case "FEAT":
-
-			break;
-		case "HELP":
-
-			break;
-		case "LANG":
 
 			break;
 		case "LIST":
@@ -162,35 +123,16 @@ public class Serveur {
 		case "LPRT":
 
 			break;
-		case "LPSV":
-
-			break;
-		case "MDTM":
-
-			break;
-		case "MIC":
-
-			break;
 		case "MKD":
-
+			// TODO Appeler processMKD
 			break;
 		case "MLSD":
-
-			break;
-		case "MLST":
-
-			break;
-		case "MODE":
-
+			
 			break;
 		case "NLST":
 			return new FtpAnswer(250, requete.processNLST());
 		case "NOOP":
-
-			break;
-		case "OPTS":
-
-			break;
+			return new FtpAnswer(200, "NOOP");
 		case "PASS":
 			if (args.length < 2) {
 				throw new ArgumentManquantException();
@@ -203,69 +145,44 @@ public class Serveur {
 				}
 			}
 		case "PASV":
-
-			break;
-		case "PBSZ":
-
-			break;
+			requete.processPASV();
+			return new FtpAnswer(227, "Entree en mode passif");
 		case "PORT":
 			// Attention, ici le port est dans le message fourni
 			String[] values = args[1].split(",");
 			return new FtpAnswer(200, ""
 					+ requete.processPORT(Integer.parseInt(values[4]),
 							Integer.parseInt(values[5])));
-		case "PROT":
-
-			break;
 		case "PWD":
 			return new FtpAnswer(257, requete.processPWD());
 		case "QUIT":
 			requete.processQUIT();
 			return new FtpAnswer(221, "Au revoir :)");
-		case "REIN":
-
-			break;
-		case "REST":
-
-			break;
-		case "RETR":
-
-			break;
 		case "RMD":
-
-			break;
-		case "RNFR":
-
+			// TODO Appeler processRMD
 			break;
 		case "RNTO":
 
 			break;
-		case "SITE":
-
-			break;
-		case "SIZE":
-
-			break;
-		case "SMNT":
-
-			break;
-		case "STAT":
-
-			break;
 		case "STOR":
-
-			break;
-		case "STOU":
-
-			break;
-		case "STRU":
-
-			break;
+			return new FtpAnswer(250, "STORRRR");//TODO Changer repose serveur apres STOR
 		case "SYST":
 			return new FtpAnswer(215, requete.processSYST());
 		case "TYPE":
-			
-			break;
+			if (args.length < 2) {
+				throw new ArgumentManquantException();
+			} else {
+				switch (args[1]) {
+				case "I":
+					requete.processTYPE(Type.BINARY);
+					return new FtpAnswer(200, "Binary");
+				case "A" :
+					requete.processTYPE(Type.ASCII);
+					return new FtpAnswer(200, "ASCII");
+				default:
+					throw new TypeIncorrectException();
+				}
+			}
 		case "USER":
 			if (args.length < 2) {
 				throw new ArgumentManquantException();
@@ -278,13 +195,11 @@ public class Serveur {
 			}
 		case "XCUP":
 		case "XMKD":
+			// TODO Appeler processMKD
 		case "XPWD":
 			return new FtpAnswer(257, requete.processPWD());
-		case "XRCP":
 		case "XRMD":
-		case "XRSQ":
-		case "XSEM":
-		case "XSEN":
+			// TODO Appeler processRMD
 		default:
 			throw new CommandeInconnueException(command);
 		}
