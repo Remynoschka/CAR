@@ -10,10 +10,9 @@ import java.util.Map;
 
 import exceptions.ArgumentManquantException;
 import exceptions.CommandeInconnueException;
-import exceptions.FichierIntrouvableException;
-import exceptions.MotDePassIncorrectException;
+import exceptions.FileUnreachableException;
+import exceptions.AuthentificationException;
 import exceptions.TypeIncorrectException;
-import exceptions.UtilisateurInconnuException;
 
 /**
  * Cette classe decrit un serveur FTP. Elle se charge d'accepter les connexions
@@ -59,14 +58,10 @@ public class Serveur {
 				new Thread(new FtpRequest(this, chaussette)).start();
 			}
 		} catch (FileNotFoundException e) {
-			System.err
-					.println("Probleme lors de la lecture du fichiers d'utilisateurs");
-			throw new RuntimeException(e);
-		} catch (IOException e) {
-			throw new RuntimeException(e);
-		} finally {
+			System.err.println("Fichier d'utilisateurs introuvable");
 			System.out.println("Fermeture du serveur");
 			serveur.close();
+			throw new RuntimeException(e);
 		}
 	}
 
@@ -95,40 +90,32 @@ public class Serveur {
 	 *            : les arguments de la commande a execute (arguments a partir
 	 *            de l'indice 1)
 	 * @return une FtpAnswer qui est la reponse du serveur (code + message)
-	 * @throws UtilisateurInconnuException
 	 * @throws CommandeInconnueException
-	 * @throws MotDePassIncorrectException
+	 * @throws AuthentificationException
 	 * @throws ArgumentManquantException
-	 * @throws TypeIncorrectException 
-	 * @throws IOException 
-	 * @throws FichierIntrouvableException 
+	 * @throws TypeIncorrectException
+	 * @throws IOException
+	 * @throws FileUnreachable
 	 */
 	public FtpAnswer performCommand(FtpRequest requete, String command,
-			String[] args) throws UtilisateurInconnuException,
-			CommandeInconnueException, MotDePassIncorrectException,
-			ArgumentManquantException, TypeIncorrectException, FichierIntrouvableException, IOException {
-
+			String[] args) throws CommandeInconnueException,
+			AuthentificationException, ArgumentManquantException,
+			TypeIncorrectException, FileUnreachableException, IOException {
 		switch (command) {
 		case "CDUP":
-
-			break;
-
+			return requete.processCDUP();
 		case "CWD":
 			return requete.processCWD(args[1]);
-		case "DELE":
-
-			break;
 		case "LIST":
-			return new FtpAnswer(250, requete.processLIST());
-		case "LPRT":
-
-			break;
+			requete.processLIST();
+			return new FtpAnswer(250, "Liste des fichiers");
 		case "MKD":
-			// TODO Appeler processMKD
-			break;
-		case "MLSD":
-			
-			break;
+			if (requete.getUser().canWrite()) {
+				if (requete.processMKD(args[1])) {
+					return new FtpAnswer(250, "Repertoire " + args[1] + " cree");
+				}
+			}
+			throw new FileUnreachableException();
 		case "NLST":
 			return new FtpAnswer(250, requete.processNLST());
 		case "NOOP":
@@ -138,34 +125,50 @@ public class Serveur {
 				throw new ArgumentManquantException();
 			} else {
 				if (requete.processPASS(args[1])) {
-					return new FtpAnswer(230,
-							"Tu as maintenant acces a tout tes fichiers MODAFOCKA !!!");
+					return new FtpAnswer(230, "Connexion au serveur etablie");
 				} else {
-					throw new MotDePassIncorrectException();
+					throw new AuthentificationException();
 				}
 			}
 		case "PASV":
-			requete.processPASV();
-			return new FtpAnswer(227, "Entree en mode passif");
+			int portPASV = requete.processPASV();
+			String ipTab[] = requete.getSocket().getLocalAddress()
+					.getHostAddress().split("\\.");
+			int port1 = portPASV / 256;
+			int port2 = portPASV % 256;
+
+			String toSend = ipTab[0] + "," + ipTab[1] + "," + ipTab[2] + ","
+					+ ipTab[3] + "," + port1 + "," + port2;
+			return new FtpAnswer(227, toSend);
 		case "PORT":
-			// Attention, ici le port est dans le message fourni
 			String[] values = args[1].split(",");
-			return new FtpAnswer(200, ""
-					+ requete.processPORT(Integer.parseInt(values[4]),
-							Integer.parseInt(values[5])));
+			requete.processPORT(Integer.parseInt(values[4]),
+					Integer.parseInt(values[5]));
+			requete.setMode(Mode.ACTIF);
+			return new FtpAnswer(200, "");
 		case "PWD":
 			return new FtpAnswer(257, requete.processPWD());
 		case "QUIT":
 			requete.processQUIT();
 			return new FtpAnswer(221, "Au revoir :)");
+		case "RETR":
+			requete.processRETR(args[1]);
+			return new FtpAnswer(226, "Fichier recu");
 		case "RMD":
-			// TODO Appeler processRMD
-			break;
-		case "RNTO":
-
-			break;
+			if (requete.getUser().canWrite()) {
+				if (requete.processRMD(args[1])) {
+					return new FtpAnswer(250, "Repertoire " + args[1]
+							+ " supprime");
+				}
+			}
+			throw new FileUnreachableException();
 		case "STOR":
-			return new FtpAnswer(250, "STORRRR");//TODO Changer repose serveur apres STOR
+			if (requete.getUser().canWrite()) {
+				requete.processSTOR(args[1]);
+				return new FtpAnswer(226, "Fichier enregistre sur le serveur");
+			} else {
+				throw new FileUnreachableException();
+			}
 		case "SYST":
 			return new FtpAnswer(215, requete.processSYST());
 		case "TYPE":
@@ -176,7 +179,7 @@ public class Serveur {
 				case "I":
 					requete.processTYPE(Type.BINARY);
 					return new FtpAnswer(200, "Binary");
-				case "A" :
+				case "A":
 					requete.processTYPE(Type.ASCII);
 					return new FtpAnswer(200, "ASCII");
 				default:
@@ -188,21 +191,30 @@ public class Serveur {
 				throw new ArgumentManquantException();
 			} else {
 				if (requete.processUSER(args[1])) {
-					return new FtpAnswer(331, "Wesh t'as pas mot de passe ?");
+					return new FtpAnswer(331, "Mot de passe ?");
 				} else {
-					throw new UtilisateurInconnuException();
+					throw new AuthentificationException();
 				}
 			}
-		case "XCUP":
 		case "XMKD":
-			// TODO Appeler processMKD
+			if (requete.getUser().canWrite()) {
+				if (requete.processMKD(args[1])) {
+					return new FtpAnswer(250, "Repertoire " + args[1] + " cree");
+				}
+			}
+			throw new FileUnreachableException();
 		case "XPWD":
 			return new FtpAnswer(257, requete.processPWD());
 		case "XRMD":
-			// TODO Appeler processRMD
+			if (requete.getUser().canWrite()) {
+				if (requete.processRMD(args[1])) {
+					return new FtpAnswer(250, "Repertoire " + args[1]
+							+ " supprime");
+				}
+			}
+			throw new FileUnreachableException();
 		default:
 			throw new CommandeInconnueException(command);
 		}
-		return new FtpAnswer(500, "");
 	}
 }

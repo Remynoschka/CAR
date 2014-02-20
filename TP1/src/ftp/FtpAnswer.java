@@ -29,7 +29,6 @@ public class FtpAnswer {
 	/**
 	 * 
 	 * @return le code de retour de la reponse du serveur FTP
-	 * @see http://en.wikipedia.org/wiki/List_of_FTP_server_return_codes
 	 */
 	public int getCode() {
 		return code;
@@ -38,7 +37,6 @@ public class FtpAnswer {
 	/**
 	 * 
 	 * @return le message de retour de la reponse du serveur FTP
-	 * @see http://en.wikipedia.org/wiki/List_of_FTP_server_return_codes
 	 */
 	public String getMessage() {
 		return msg;

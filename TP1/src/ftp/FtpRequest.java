@@ -7,15 +7,11 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.ServerSocket;
 import java.net.Socket;
-import java.nio.file.Files;
-import java.nio.file.LinkOption;
-import java.nio.file.attribute.PosixFilePermission;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.List;
 
-import exceptions.FichierIntrouvableException;
+import exceptions.AuthentificationException;
+import exceptions.FileUnreachableException;
 import exceptions.FtpException;
 
 /**
@@ -27,13 +23,14 @@ import exceptions.FtpException;
  */
 public class FtpRequest implements Runnable {
 	private Serveur serveur;
-	private String username;
+	private Utilisateur user;
 	private Socket socket;
 	private File directory;
 	boolean quit = false;
 	private Type type;
+	private int dataPort;
+	private ServerSocket serveurPassif;
 	private Socket dataChannel;
-	private int portPASV;
 	private Mode mode;
 
 	public FtpRequest(Serveur serv, Socket socket) {
@@ -54,14 +51,14 @@ public class FtpRequest implements Runnable {
 					socket.getInputStream());
 			// boucle principale
 			while (!quit) {
-				byte[] buffer = new byte[32];
+				byte[] buffer = new byte[256];
 				bis.read(buffer);
 				String recu = new String(buffer);
 				// traitement
 				if (recu.contains("\n"))
 					recu = recu.substring(0, recu.indexOf('\n'));
 				recu = recu.substring(0, recu.length() - 1);
-				String[] command = recu.split(" ");
+				String[] command = recu.split(" ", 2);
 				if (Main.DEBUG_MODE)
 					System.out.println(recu);
 
@@ -72,23 +69,49 @@ public class FtpRequest implements Runnable {
 		} catch (IOException e) {
 			System.err.println("Erreur d'ecriture socket: " + e.getMessage());
 			throw new RuntimeException(e);
+		} catch (AuthentificationException e) {
+			try {
+				System.err
+						.println("Authentification invalide, fermeture de la connexion");
+				socket.close();
+			} catch (IOException e1) {
+				System.err.println("Erreur de fermeture de la socket : "
+						+ e.getMessage());
+				throw new RuntimeException(e);
+			}
 		} catch (FtpException e) {
 			try {
 				socket.getOutputStream().write(e.getAnswer().getBytes());
 			} catch (IOException e1) {
-				System.err.println("Erreur d'ecriture sur socket: "
+				System.err.println("Erreur d'ecriture sur la socket: "
 						+ e1.getMessage());
 				throw new RuntimeException(e);
 			}
-		} finally {
-			try {
-				socket.close();
-			} catch (IOException e) {
-				System.err.println("Erreur de fermeture de serveur: "
-						+ e.getMessage());
-				throw new RuntimeException(e);
-			}
 		}
+	}
+
+	public Socket getSocket() {
+		return this.socket;
+	}
+
+	protected void setMode(Mode mode) {
+		this.mode = mode;
+	}
+
+	/**
+	 * 
+	 * @return l'utilisateur de la requete FTP
+	 */
+	public Utilisateur getUser() {
+		return this.user;
+	}
+
+	/**
+	 * 
+	 * @return si la connexion est en mode Acitf ou Passif
+	 */
+	public Mode getMode() {
+		return mode;
 	}
 
 	/**
@@ -99,7 +122,7 @@ public class FtpRequest implements Runnable {
 	 * @return true si l'username est connue par le serveur
 	 */
 	public boolean processUSER(String username) {
-		this.username = username;
+		this.user = serveur.getUsers().get(username);
 		return serveur.getUsers().containsKey(username);
 	}
 
@@ -107,28 +130,41 @@ public class FtpRequest implements Runnable {
 	 * Effectue la commande FTP PASS
 	 */
 	public boolean processPASS(String password) {
-		return serveur.getUsers().get(username).getPwd().equals(password);
+		return serveur.getUsers().get(user.getUsername()).getPwd()
+				.equals(password);
 	}
 
 	/**
 	 * Effectue la commande FTP RETR
+	 * 
+	 * @throws IOException
 	 */
-	public void processRETR(Socket chaussette, String fichier) {
+	public void processRETR(String fichier) {
 		// TODO Corriger RETR
+		System.out.println(fichier);
 		try {
-			InputStream in = new FileInputStream(fichier);
-			OutputStream out = chaussette.getOutputStream();
+			socket.getOutputStream().write(
+					new FtpAnswer(150, "Les fichiers arrivent").getBytes());
+			if (mode == Mode.PASSIF) {
+				dataChannel = serveurPassif.accept();
+			} else {
+				dataChannel = new Socket(socket.getInetAddress(), dataPort);
+			}
+			OutputStream out = dataChannel.getOutputStream();
 
+			FileInputStream fis = new FileInputStream(directory.getPath() + "/"
+					+ fichier);
 			int numberByte;
-			byte[] data = new byte[2046];
+			byte[] data = new byte[2048];
 
-			while ((numberByte = in.read(data)) != -1) {
+			while ((numberByte = fis.read(data)) != -1) {
 				out.write(data, 0, numberByte);
 			}
-
+			fis.close();
 			out.close();
 		} catch (IOException e) {
-			System.err.println(e.getMessage());
+			System.err.println("Erreur lors de l'envoie de fichier : "
+					+ e.getMessage());
 			throw new RuntimeException(e);
 		}
 
@@ -139,14 +175,23 @@ public class FtpRequest implements Runnable {
 	 */
 	public void processSTOR(String filename) {
 		// TODO Corriger STOR
-		try {
 
+		try {
+			socket.getOutputStream()
+					.write(new FtpAnswer(150,
+							"Les fichiers sont prets a etre envoyes")
+							.getBytes());
+			if (mode == Mode.PASSIF) {
+				dataChannel = serveurPassif.accept();
+			} else {
+				dataChannel = new Socket(socket.getInetAddress(), dataPort);
+			}
 			InputStream in = dataChannel.getInputStream();
 			// A modifier (pour le test)
 			OutputStream out = new FileOutputStream(directory + "/" + filename);
 
 			int numberByte;
-			byte[] data = new byte[2056];
+			byte[] data = new byte[2048];
 
 			while ((numberByte = in.read(data)) != -1) {
 				out.write(data, 0, numberByte);
@@ -155,107 +200,105 @@ public class FtpRequest implements Runnable {
 			out.flush();
 			out.close();
 		} catch (IOException e) {
-			System.err.println(e.getMessage());
+			System.err.println("Erreur lors du stockage du fichier : "
+					+ e.getMessage());
 			throw new RuntimeException(e);
 		}
 	}
 
 	/**
-	 * Effectue la commande FTP LIST Sous UNIX, la commande affichera la liste
-	 * des fichiers tel qu'une commande ls -l. <br/>
-	 * Par exemple : -rw-r--r-- owner ownergroup 278 jan 14 13:37 monfichier<br/>
-	 * <br/>
-	 * Sous Windows, cela n'affichera que le nom du proprietaire, la date de
-	 * derniere modification et le nom du fichier
+	 * Effectue la commande FTP LIST. Transmet au client la liste
+	 * 
+	 * @throws IOException
 	 */
-	public String processLIST() {
+	public void processLIST() throws IOException {
 		File[] files = directory.listFiles();
 		String[] list = new String[files.length];
+		socket.getOutputStream().write(
+				new FtpAnswer(150, "La liste arrive").getBytes());
+		// ouverture de socket
+		if (mode == Mode.PASSIF) {
+			dataChannel = serveurPassif.accept();
+		} else {
+			dataChannel = new Socket(socket.getInetAddress(), dataPort);
+		}
+
 		for (int i = 0; i < list.length; i++) {
-
-			String formatted = "";
-			// formattage de la date
-			Date last_modification = new Date(files[i].lastModified());
-			String last_modification_string = last_modification.toString();
-			last_modification_string = last_modification_string.substring(
-					last_modification_string.indexOf(' ') + 1,
-					last_modification_string.lastIndexOf(':'));
-
-			formatted = last_modification_string + " " + formatted;
-			// taille du fichier
-			long taille = files[i].length();
-			formatted = taille + " " + formatted;
-			try {
-				// groupe
-				// Ne marche pas sous Windows
-				if (!System.getProperty("os.name").toLowerCase()
-						.startsWith("windows")) {
-					String group = Files.getAttribute(files[i].toPath(),
-							"posix:group", LinkOption.values()).toString();
-					formatted = group + " " + formatted;
-				}
-				// proprietaire
-				String proprietaire = Files.getOwner(files[i].toPath(),
-						LinkOption.values()).toString();
-				formatted = proprietaire + " " + formatted;
-				// permissions
-				if (!System.getProperty("os.name").toLowerCase()
-						.startsWith("windows")) {
-					List<PosixFilePermission> permissions = new ArrayList<PosixFilePermission>();
-					// Ne marche pas sous Windows
-					for (PosixFilePermission p : Files.getPosixFilePermissions(
-							files[i].toPath(), LinkOption.values())) {
-						permissions.add(p);
-					}
-					String permissions_string = "";
-					for (PosixFilePermission type : PosixFilePermission
-							.values()) {
-						if (permissions.contains(type)) {
-							if (type.toString().endsWith("READ"))
-								permissions_string += "r";
-							if (type.toString().endsWith("WRITE"))
-								permissions_string += "w";
-							if (type.toString().endsWith("EXECUTE"))
-								permissions_string += "x";
-						} else {
-							permissions_string += "-";
-						}
-					}
-					formatted = permissions_string + " " + formatted;
-				}
-				// formattage du nom de fichier
-				if (!System.getProperty("os.name").toLowerCase()
-						.startsWith("windows")) {
-					formatted = (files[i].isDirectory()) ? "d" + formatted
-							+ files[i].getName() + "/" : "-" + formatted
-							+ files[i].getName();
-				} else {
-					formatted = (files[i].isDirectory()) ? formatted
-							+ files[i].getName() + "/" : formatted
-							+ files[i].getName();
-				}
-			} catch (IOException e) {
-				System.err
-						.println("Erreur de lecture du repertoire lors d'un LIST: "
-								+ e.getMessage());
-				throw new RuntimeException(e);
+			if (!files[i].isHidden()) {
+				String filename = "";
+				// String proprietaire = "";
+				// formattage de la date
+				double date = files[i].lastModified() / 1000.0;
+				String last_modification_string = ",m" + date;
+				// taille du fichier
+				long taille = files[i].length();
+				//
+				// try {
+				// // proprietaire
+				// proprietaire = Files.getOwner(files[i].toPath(),
+				// LinkOption.values()).toString();
+				// // permissions
+				// if (!System.getProperty("os.name").toLowerCase()
+				// .startsWith("windows")) {
+				// List<PosixFilePermission> permissions = new
+				// ArrayList<PosixFilePermission>();
+				// // Ne marche pas sous Windows
+				// for (PosixFilePermission p : Files
+				// .getPosixFilePermissions(files[i].toPath(),
+				// LinkOption.values())) {
+				// permissions.add(p);
+				// }
+				// String permissions_string = "";
+				// for (PosixFilePermission type : PosixFilePermission
+				// .values()) {
+				// if (permissions.contains(type)) {
+				// if (type.toString().endsWith("READ"))
+				// permissions_string += "r";
+				// if (type.toString().endsWith("WRITE"))
+				// permissions_string += "w";
+				// if (type.toString().endsWith("EXECUTE"))
+				// permissions_string += "x";
+				// } else {
+				// permissions_string += "-";
+				// }
+				// }
+				// }
+				//
+				// } catch (IOException e) {
+				// System.err
+				// .println("Erreur de lecture du repertoire lors d'un LIST: "
+				// + e.getMessage());
+				// throw new RuntimeException(e);
+				// }
+				//
+				// nom de fichier
+				filename = "\011" + files[i].getName();
+				String fileDescription = (files[i].isDirectory()) ? "+/" : "+r"
+						+ ",s" + taille;
+				list[i] = fileDescription + last_modification_string + filename
+						+ "\015\012";
 			}
-			list[i] = formatted;
 		}
-		// mettre tout les fichiers l'un derriere l'autre
-		String toReturn = "";
+		// ecrire tout les fichiers
 		for (String s : list) {
-			toReturn = toReturn + s + "\n";
+			dataChannel.getOutputStream().write(
+					new String(s + "\r\n").getBytes());
 		}
-		return toReturn;
+		dataChannel.close();
+
 	}
 
 	/**
 	 * Effectue la commande FTP QUIT
 	 * 
+	 * @throws IOException
+	 * 
 	 */
-	public void processQUIT() {
+	public void processQUIT() throws IOException {
 		// TODO Ameliorer QUIT
+		dataChannel.close();
+		serveurPassif.close();
+		socket.close();
 		quit = true;
 	}
 
@@ -278,7 +321,8 @@ public class FtpRequest implements Runnable {
 	 * @return le port que doit utiliser le serveur (a*256 +b)
 	 */
 	public int processPORT(int a, int b) {
-		return (a * 256) + b;
+		this.dataPort = (a * 256) + b;
+		return dataPort;
 	}
 
 	/**
@@ -302,25 +346,45 @@ public class FtpRequest implements Runnable {
 	 *            : le chemin vers le repertoire de destination
 	 * @return la reponse FTP renvoye par la commande
 	 * @throws IOException
-	 * @throws FichierIntrouvableException
+	 * @throws FileUnreachableException
 	 */
 	public FtpAnswer processCWD(String path) throws IOException,
-			FichierIntrouvableException {
-		// TODO Corriger CWD
-		if (path.equals("/")) {
+			FileUnreachableException {
+
+		if (path.equals("/")
+				|| path.equals("/" + serveur.getFilesDirectory().getName())) {
 			directory = serveur.getFilesDirectory();
 			return new FtpAnswer(250, "Le nouveau repertoire est " + path);
 		} else {
+
+			String fileSeparator = (processSYST().toLowerCase()
+					.startsWith("win")) ? "\\" : "/";
 			for (File f : directory.listFiles()) {
 				if (f.getCanonicalPath().equals(
-						directory.getCanonicalPath() + path)) {
+						directory.getCanonicalPath() + fileSeparator + path)
+						&& f.isDirectory()) {
 					directory = f;
 					return new FtpAnswer(250, "Le nouveau repertoire est "
 							+ path);
 				}
 			}
-			throw new FichierIntrouvableException();
+			throw new FileUnreachableException();
 		}
+	}
+
+	/**
+	 * Execute la commande FTP CDUP
+	 * 
+	 * @throws FileUnreachableException
+	 */
+	public FtpAnswer processCDUP() throws FileUnreachableException {
+		if (!directory.getPath().equals(serveur.getFilesDirectory().getPath())) {
+			System.out.println("cdup");
+			directory = new File(directory.getParent());
+			return new FtpAnswer(250, "Retour au repertoire /"
+					+ directory.getPath());
+		}
+		throw new FileUnreachableException();
 	}
 
 	/**
@@ -329,10 +393,7 @@ public class FtpRequest implements Runnable {
 	 * @return le chemin du repertoire courant
 	 */
 	public String processPWD() {
-		if (directory.getPath().equals(serveur.getFilesDirectory().getPath())) {
-			return "/";
-		}
-		return "/" + directory.getPath();
+		return "/" + directory.getPath().replace('\\', '/');
 	}
 
 	/**
@@ -348,28 +409,30 @@ public class FtpRequest implements Runnable {
 	/**
 	 * Execute la commande FTP PASV
 	 * 
-	 * @see http://blog.nicolargo.com/2008/04/ftp-actif-versus-ftp-passif.html
+	 * @return le port genere par PASV
 	 */
-	public void processPASV() {
+	public int processPASV() {
 		mode = Mode.PASSIF;
-	}
-
-	/**
-	 * Execute la commande FTP CDUP
-	 */
-	public void processCDUP() {
-		// TODO CDUP
+		try {
+			serveurPassif = new ServerSocket(0);
+			dataPort = serveurPassif.getLocalPort();
+		} catch (IOException e) {
+			System.err
+					.println("Impossible d'ouvrir le serveur de donnees en passif");
+			throw new RuntimeException(e);
+		}
+		return dataPort;
 	}
 
 	/**
 	 * Execute la commande FTP MKD
 	 * 
-	 * @param name
-	 *            : le nom du repertoire a creer
+	 * @param pathname
+	 *            : le chemin du repertoire a creer
 	 * @return true si le repertoire a bien ete cree, false sinon
 	 */
-	public boolean processMKD(String name) {
-		File newDir = new File(directory.getPath() + "/" + name);
+	public boolean processMKD(String pathname) {
+		File newDir = new File(directory + "/" + pathname);
 		return newDir.mkdir();
 	}
 
@@ -381,7 +444,7 @@ public class FtpRequest implements Runnable {
 	 * @return true si le repertoire a bien ete supprime, false sinon
 	 */
 	public boolean processRMD(String name) {
-		File toDelete = new File(directory.getAbsolutePath() + "/" + name);
+		File toDelete = new File(directory.getPath() + "/" + name);
 		if (toDelete.exists()) {
 			toDelete.delete();
 			return true;
